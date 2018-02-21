@@ -6,10 +6,18 @@ fi
 
 EXTRACTOR_NAME="ext-dump-ins"
 
+EXTRACTORS=( ext-dump-ins ext-mem-rw-dump )
+
 INSTALL_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PINTOOL_INSTALL_PATH="${INSTALL_DIR}/../../dependencies/pin-3.5-97503-gac534ca30-msvc-windows"
 # FIXME: This is hardcoded 64bit dll...
-PIN_PATH="${INSTALL_DIR}/obj-intel64/a${EXTRACTOR_NAME}.dll"
+PINTOOLS_PATH="${INSTALL_DIR}/obj-intel64"
+
+function get_pin_tool_path() {
+	local extractorName=$1
+
+	echo "${PINTOOLS_PATH}/a${extractorName}.dll"
+}
 
 function clean() {
 	
@@ -40,17 +48,17 @@ function pin_proc() {
 	local targetExe=$1
 	local pin=$2
 
-	$(get_pin_path) -t ${pin} -- ${targetExe}
+	$(get_pin_exe_path) -t ${pin} -- ${targetExe}
 }
 
 function pin_pid() {
 	local pid=$1
 	local pin=$2
 
-	$(get_pin_path) -pid ${pid} -t ${pin}
+	$(get_pin_exe_path) -pid ${pid} -t ${pin}
 }
 
-function get_pin_path() {
+function get_pin_exe_path() {
 	if [[ $(is64) -eq 0 ]]; then
 		echo "${PINTOOL_INSTALL_PATH}/pin.exe"
 	else
@@ -67,16 +75,27 @@ function is64() {
 	fi
 }
 
+function get_feature_extractor_output_file() {
+	local extractorName=$1
+	echo "f${extractorName}.out"
+}
+
 function main() {
 	clean all 2>/dev/null | true
 	dotest
 	build
-	
-	pin_proc "./traceme.exe" $(cygpath -w "${PIN_PATH}")
 
-	time python "f${EXTRACTOR_NAME}.py" > ${EXTRACTOR_NAME}.out
-	head ${EXTRACTOR_NAME}.out
-	wc -l *.out
+	for extractor in "${EXTRACTORS[@]}"; do
+	
+		local pintool_dll_path=$(get_pin_tool_path ${extractor})
+		pin_proc "./traceme.exe" $(cygpath -w "${pintool_dll_path}")
+
+		local feature_output_file=$(get_feature_extractor_output_file ${extractor})
+		time python "f${extractor}.py" > ${feature_output_file}
+		head f${extractor}.out
+		wc -l *.out
+	done
+		
 	clean 2>/dev/null | true
 }
 
