@@ -80,6 +80,11 @@ function get_feature_extractor_output_file() {
 	echo "f${extractorName}.out"
 }
 
+function get_feature_extractor() {
+	local extractorName=$1
+	echo "f${extractorName}.py" | sed 's/-/_/g'
+}
+
 function main() {
 	clean all 2>/dev/null | true
 	dotest
@@ -91,7 +96,7 @@ function main() {
 		pin_proc "./traceme.exe" $(cygpath -w "${pintool_dll_path}")
 
 		local feature_output_file=$(get_feature_extractor_output_file ${extractor})
-		time python "f${extractor}.py" > ${feature_output_file}
+		time python $(get_feature_extractor ${extractor}) > ${feature_output_file}
 		head f${extractor}.out
 		wc -l *.out
 	done
