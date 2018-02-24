@@ -31,7 +31,9 @@ function clean() {
 }
 
 function dotest() {
-	python -m unittest discover --pattern=*.py	
+	for i in $(ls *.py); do
+		python -m unittest discover --pattern=$i
+	done
 }
 
 function build() {

@@ -4,15 +4,18 @@ import sys
 from hexdump import hexdump
 import unittest
 
+from fext_common import *
+
 DEBUG = True
 EXTRACTOR_NAME = 'ext-dump-ins'
 
 class TestDecode(unittest.TestCase):
 	def test_decode(self):
-		allocate_stack_space = ["4883ec28"]
-		expected = '0x1000:\tsub\trsp, 0x28\n' 
+		allocate_stack_space = ["0x7ff768ea737f:4883ec28:EOL"]
+		expected = '0x7ff768ea737f:\tsub\trsp, 0x28\n' 
 		print "testing %s -> %s" % (allocate_stack_space, expected)
-		self.assertEqual(dump_instructions(ascii_stream_to_hex(allocate_stack_space)), expected)
+		instructions = dump_instructions(allocate_stack_space)
+		self.assertEqual(instructions, expected)
 
 def dump_instructions(ascii_lines):
 	(bytestream, start_addr) = ascii_stream_to_hex(ascii_lines)
@@ -30,6 +33,8 @@ def ascii_stream_to_hex(ascii_lines):
 	start_addr = 0
 	stream = ""
 
+	print len(ascii_lines)
+
 	for l in ascii_lines:
 
 		if start_addr == 0:
@@ -40,10 +45,6 @@ def ascii_stream_to_hex(ascii_lines):
 
 	return (stream, start_addr)
 
-def parse_pintool_dump(fn):
-	fd = open(fn, 'r')
-	pp = [l.strip() for l in fd.readlines()][:-1]
-	print dump_instructions(pp)
 
 if __name__ == '__main__':
-	parse_pintool_dump('a%s.out' % (EXTRACTOR_NAME))
+	print dump_instructions(get_pintool_output(EXTRACTOR_NAME))

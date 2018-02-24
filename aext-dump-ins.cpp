@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include "pin.H"
+#include "aext-common.h"
 
 #define EXTRACTOR_NAME "aext-dump-ins"
 #define EXTRACTOR_LOG EXTRACTOR_NAME##".out"
@@ -9,8 +10,7 @@
 FILE * output_fd;
 PIN_LOCK lock;
 
-ADDRINT entry_point, exit_point;
-int passedEntryPoint = 0;
+struct entry_point_tracker tracker;
 
 void log_instruction(void *ip, USIZE size) {
 
@@ -36,15 +36,11 @@ void log_instruction(void *ip, USIZE size) {
 
 void each_instruction(INS ins, VOID *v)
 {
-#ifdef SKIP_BRACES
-    ADDRINT inst_addr = INS_Address(ins);
-    if (inst_addr >= entry_point && inst_addr <= exit_point) {
-#endif        
+    IF_IN_MODULE(INS_Address(ins), tracker) 
+    {
         INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)log_instruction, 
             IARG_INST_PTR, IARG_UINT32, INS_Size(ins), IARG_END);
-#ifdef SKIP_BRACES
     }
-#endif	
 }
 
 void finish(INT32 code, VOID *v)
@@ -56,9 +52,9 @@ void finish(INT32 code, VOID *v)
 void check_loaded_image(IMG img, void *v)
 {
     if (IMG_IsMainExecutable(img)) {
-        entry_point = IMG_Entry(img);
-        exit_point = entry_point + IMG_SizeMapped(img);
-        fprintf(stderr, "entry point @ %p\n", (void *)entry_point);
+        tracker.entry_point = IMG_Entry(img);
+        tracker.exit_point = tracker.entry_point + IMG_SizeMapped(img);
+        fprintf(stderr, "entry point @ %p\n", (void *)tracker.entry_point);
         fprintf(stderr, "size: %llu\n", IMG_SizeMapped(img));
     }
 }

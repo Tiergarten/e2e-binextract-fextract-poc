@@ -37,8 +37,13 @@ END_LEGAL */
 #include <fstream>
 #include <iomanip>
 
+#include "aext-common.h"
+
 #define EXTRACTOR_NAME "aext-mem-rw-dump"
 #define EXTRACTOR_LOG EXTRACTOR_NAME##".out"
+
+PIN_LOCK lock;
+struct entry_point_tracker tracker;
 
 /* ===================================================================== */
 /* Global Variables */
@@ -115,12 +120,14 @@ static VOID EmitMem(VOID * ea, INT32 size)
 
 static VOID RecordMem(VOID * ip, CHAR r, VOID * addr, INT32 size, BOOL isPrefetch)
 {
+    PIN_GetLock(&lock, 0);
     TraceFile << ip << ": " << r << " " << setw(2+2*sizeof(ADDRINT)) << addr << " "
               << dec << setw(2) << size << " "
               << hex << setw(2+2*sizeof(ADDRINT));
     if (!isPrefetch)
         EmitMem(addr, size);
     TraceFile << endl;
+    PIN_ReleaseLock(&lock);
 }
 
 static VOID * WriteAddr;
@@ -143,56 +150,59 @@ VOID Instruction(INS ins, VOID *v)
 
     // instruments loads using a predicated call, i.e.
     // the call happens iff the load will be actually executed
+    IF_IN_MODULE(INS_Address(ins), tracker) 
+    {
         
-    if (INS_IsMemoryRead(ins) && INS_IsStandardMemop(ins))
-    {
-        INS_InsertPredicatedCall(
-            ins, IPOINT_BEFORE, (AFUNPTR)RecordMem,
-            IARG_INST_PTR,
-            IARG_UINT32, 'R',
-            IARG_MEMORYREAD_EA,
-            IARG_MEMORYREAD_SIZE,
-            IARG_BOOL, INS_IsPrefetch(ins),
-            IARG_END);
-    }
-
-    if (INS_HasMemoryRead2(ins) && INS_IsStandardMemop(ins))
-    {
-        INS_InsertPredicatedCall(
-            ins, IPOINT_BEFORE, (AFUNPTR)RecordMem,
-            IARG_INST_PTR,
-            IARG_UINT32, 'R',
-            IARG_MEMORYREAD2_EA,
-            IARG_MEMORYREAD_SIZE,
-            IARG_BOOL, INS_IsPrefetch(ins),
-            IARG_END);
-    }
-
-    // instruments stores using a predicated call, i.e.
-    // the call happens iff the store will be actually executed
-    if (INS_IsMemoryWrite(ins) && INS_IsStandardMemop(ins))
-    {
-        INS_InsertPredicatedCall(
-            ins, IPOINT_BEFORE, (AFUNPTR)RecordWriteAddrSize,
-            IARG_MEMORYWRITE_EA,
-            IARG_MEMORYWRITE_SIZE,
-            IARG_END);
-        
-        if (INS_HasFallThrough(ins))
+        if (INS_IsMemoryRead(ins) && INS_IsStandardMemop(ins))
         {
-            INS_InsertCall(
-                ins, IPOINT_AFTER, (AFUNPTR)RecordMemWrite,
+            INS_InsertPredicatedCall(
+                ins, IPOINT_BEFORE, (AFUNPTR)RecordMem,
                 IARG_INST_PTR,
+                IARG_UINT32, 'R',
+                IARG_MEMORYREAD_EA,
+                IARG_MEMORYREAD_SIZE,
+                IARG_BOOL, INS_IsPrefetch(ins),
                 IARG_END);
         }
-        if (INS_IsBranchOrCall(ins))
+
+        if (INS_HasMemoryRead2(ins) && INS_IsStandardMemop(ins))
         {
-            INS_InsertCall(
-                ins, IPOINT_TAKEN_BRANCH, (AFUNPTR)RecordMemWrite,
+            INS_InsertPredicatedCall(
+                ins, IPOINT_BEFORE, (AFUNPTR)RecordMem,
                 IARG_INST_PTR,
+                IARG_UINT32, 'R',
+                IARG_MEMORYREAD2_EA,
+                IARG_MEMORYREAD_SIZE,
+                IARG_BOOL, INS_IsPrefetch(ins),
                 IARG_END);
         }
-        
+
+        // instruments stores using a predicated call, i.e.
+        // the call happens iff the store will be actually executed
+        if (INS_IsMemoryWrite(ins) && INS_IsStandardMemop(ins))
+        {
+            INS_InsertPredicatedCall(
+                ins, IPOINT_BEFORE, (AFUNPTR)RecordWriteAddrSize,
+                IARG_MEMORYWRITE_EA,
+                IARG_MEMORYWRITE_SIZE,
+                IARG_END);
+            
+            if (INS_HasFallThrough(ins))
+            {
+                INS_InsertCall(
+                    ins, IPOINT_AFTER, (AFUNPTR)RecordMemWrite,
+                    IARG_INST_PTR,
+                    IARG_END);
+            }
+            if (INS_IsBranchOrCall(ins))
+            {
+                INS_InsertCall(
+                    ins, IPOINT_TAKEN_BRANCH, (AFUNPTR)RecordMemWrite,
+                    IARG_INST_PTR,
+                    IARG_END);
+            }
+            
+        }
     }
 }
 
@@ -203,6 +213,16 @@ VOID Fini(INT32 code, VOID *v)
     TraceFile << "#eof" << endl;
     
     TraceFile.close();
+}
+
+void check_loaded_image(IMG img, void *v)
+{
+    if (IMG_IsMainExecutable(img)) {
+        tracker.entry_point = IMG_Entry(img);
+        tracker.exit_point = tracker.entry_point + IMG_SizeMapped(img);
+        fprintf(stderr, "entry point @ %p\n", (void *)tracker.entry_point);
+        fprintf(stderr, "size: %llu\n", IMG_SizeMapped(img));
+    }
 }
 
 /* ===================================================================== */
@@ -223,8 +243,11 @@ int main(int argc, char *argv[])
     TraceFile.open(EXTRACTOR_LOG);
     TraceFile.write(trace_header.c_str(),trace_header.size());
     TraceFile.setf(ios::showbase);
+
+    PIN_InitLock(&lock);
     
     INS_AddInstrumentFunction(Instruction, 0);
+    IMG_AddInstrumentFunction(check_loaded_image, 0);
     PIN_AddFiniFunction(Fini, 0);
 
     // Never returns
