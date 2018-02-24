@@ -1,6 +1,7 @@
 import re
 import unittest
 import pandas as pd
+import numpy as np
 
 EXTRACTOR_NAME = 'ext-mem-rw-dump'
 sample_file = """#
@@ -13,37 +14,112 @@ sample_file = """#
 0x00007ffd37cd14b5: R 0x000000361957ec40  1                0x1
 0x00007ffd37cd14bf: R 0x000000361957ec80  8      0x190c9617040
 0x00007ffd37cd14c8: R 0x000000361957ec50  8                  0
+0x00007ffd38cd14c8: R 0x000000361957ec50  8                  0
 """
 
+
+class TestChunkCreation(unittest.TestCase):
+    def test_correct_number_of_chunks(self):
+        df = get_df_from_file()
+        self.assertEqual(len(df), 8)
+
+        chunk_mem_ref_deltas = get_chunk_mem_deltas(df)
+        self.assertEqual(len(chunk_mem_ref_deltas), 2)
+
+        self.assertEqual(chunk_mem_ref_deltas[0], 230203830268)
+
+
 def parse_line(str):
-	regex = r'(\w+): (W|R) (\w+) +(\d) +(\w+)'
-	match = re.match(regex, str)
-	if match:
-		ins_addr = match.group(1)
-		rw = match.group(2)
-		tgt_addr = match.group(3)
-		return (int(ins_addr, 16), rw, int(tgt_addr, 16))
-	return None	
+    regex = r'(\w+): (W|R) (\w+) +(\d) +(\w+)'
+    match = re.match(regex, str)
+
+    if match:
+        ins_addr = match.group(1)
+        rw = match.group(2)
+        tgt_addr = match.group(3)
+        return int(ins_addr, 16), rw, int(tgt_addr, 16)
+    else:
+        return None
+
 
 def get_df(stats):
-	idx = [s[0] for s in stats]
-	mem_access = {
-		'RW' : pd.Series([s[1] for s in stats], index=idx),
-		'TGT' :pd.Series([s[2] for s in stats], index=idx)
-	}
+    idx = [s[0] for s in stats]
+    mem_access = {
+        'RW': pd.Series([s[1] for s in stats], index=idx),
+        'TGT': pd.Series([s[2] for s in stats], index=idx)
+    }
 
-	df = pd.DataFrame(mem_access)
-	return df
+    df = pd.DataFrame(mem_access)
+    return df
 
-def stub():
-	stats = []
-	for line in sample_file.split('\n'):
-		p = parse_line(line)
-		if p is not None:
-			stats.append(p)
 
-	return get_df(stats)
+def get_df_from_file():
+    stats = []
+    for line in sample_file.split('\n'):
+        p = parse_line(line)
+        if p is not None:
+            stats.append(p)
+
+    return get_df(stats)
+
+
+def get_idx_val(row):
+    return row.index.values[0]
+
+
+def get_chunks(df, chunk_size_bytes=10000):
+    start = get_idx_val(df.head(1))
+    end = get_idx_val(df.tail(1))
+
+    n_chunks = (end-start) / chunk_size_bytes
+    print 'n_chunks: ' + str(n_chunks)
+
+    if n_chunks == 0:
+        return [df]
+
+    ret = []
+    for i in range(0, n_chunks+1):
+        start_idx = start + (i*chunk_size_bytes)
+        chunk_df = df.loc[start_idx:start_idx+chunk_size_bytes]
+        if not chunk_df.empty:
+            print 'Chunk %d:%d len = %d' % (start_idx, start_idx + chunk_size_bytes, len(chunk_df))
+            ret.append(chunk_df)
+
+    return ret
+
+
+def get_chunk_mem_deltas(df, mode='default'):
+    ret = []
+    for c in get_chunks(df):
+        ret.append(calc_mem_access_delta(c, mode))
+
+    return ret
+
+
+# TODO: Add support for: sum, max, min, abs... of references from base reference
+def calc_mem_access_delta(df, mode='default'):
+
+    if len(df) == 1:
+        return 0
+
+    base_reference = df.head(1)['TGT'].values[0]
+
+    # todo: should we math.abs() this??
+    tgt_deltas = df['TGT'].apply(lambda x: base_reference - x)
+    return tgt_deltas.sum()
 
 
 if __name__ == '__main__':
-	print stub()
+    df = get_df_from_file()
+
+    # Split mem access into chunks, and calculate the mem access delta (from first in chunk)
+    chunk_tgt_deltas = get_chunk_mem_deltas(df)
+
+    # Produce histogram
+    # TODO: We will need to set static 'range' here so results are comparable accross all .exe's
+    # TODO: Can we emit metadata (min,max), so we can see if range should expand as we process BAU?
+    tdeltas = pd.DataFrame(chunk_tgt_deltas)
+    count, division = np.histogram(tdeltas)
+
+    print count
+    print division
