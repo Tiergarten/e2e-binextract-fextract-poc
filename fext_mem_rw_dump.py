@@ -3,8 +3,10 @@ import unittest
 import pandas as pd
 import numpy as np
 from fext_common import *
+from enum import Enum
 
 EXTRACTOR_NAME = 'ext-mem-rw-dump'
+
 
 class TestChunkCreation(unittest.TestCase):
     sample_file = """#
@@ -20,10 +22,11 @@ class TestChunkCreation(unittest.TestCase):
 0x00007ffd38cd14c8: R 0x000000361957ec50  8                  0
 0x00007ffd37cd1493: W 0x000000361957ec40  1                0x1
 """
-    def test_correct_number_of_chunks(self):
+
+    def test_sample_output_chunks(self):
         test_data = pp_pin_output(self.sample_file.split('\n'))
+
         df = get_df_from_file(test_data)
-        
         self.assertEqual(len(df), 9)
 
         chunk_mem_ref_deltas = get_chunk_mem_deltas(df)
@@ -32,8 +35,35 @@ class TestChunkCreation(unittest.TestCase):
         self.assertEqual(len(chunk_mem_ref_deltas), 1)
         self.assertEqual(chunk_mem_ref_deltas[0], 230203830252)
 
+    def test_more_than_one_chunk(self, data_sz=20000):
+        sample_data = "0x00007ffd37cd1493: W 0x000000361957ec40  1                0x1\n" + \
+            "0x00007ffd37cd1493: W 0x000000361957ec41  1                0x1\n"
 
-def parse_line(str):
+        sample_data *= data_sz
+        test_data = pp_pin_output(sample_data.split('\n'))
+
+        df = get_df_from_file(test_data)
+        self.assertEqual(len(df), data_sz*2)
+
+        chunk_mem_ref_deltas = get_chunk_mem_deltas(df, 10000, MemOffsetMode.DEFAULT)
+        self.assertEqual([5000, 5000, 5000, 5000], chunk_mem_ref_deltas)
+
+    def test_read_write_segregation(self):
+        sample_data = "0x00007ffd37cd1493: W 0x000000361957ec40  1                0x1\n" + \
+                      "0x00007ffd37cd1493: R 0x000000361957ec41  1                0x1\n"
+
+        test_data = pp_pin_output(sample_data.split('\n'))
+        df = get_df_from_file(test_data, 'r')
+        self.assertEqual(len(df), 1)
+
+        df = get_df_from_file(test_data, 'w')
+        self.assertEqual(len(df), 1)
+
+        df = get_df_from_file(test_data, 'rw')
+        self.assertEqual(len(df), 2)
+
+
+def parse_line(str, type):
     regex = r'(\w+): (W|R) (\w+) +(\d) +(\w+)'
     match = re.match(regex, str)
 
@@ -41,9 +71,11 @@ def parse_line(str):
         ins_addr = match.group(1)
         rw = match.group(2)
         tgt_addr = match.group(3)
-        return int(ins_addr, 16), rw, int(tgt_addr, 16)
-    else:
-        return None
+
+        if rw in type.upper():
+            return int(ins_addr, 16), rw, int(tgt_addr, 16)
+
+    return None
 
 
 def get_df(stats):
@@ -57,10 +89,10 @@ def get_df(stats):
     return df
 
 
-def get_df_from_file(lines):
+def get_df_from_file(lines, type='rw'):
     stats = []
     for line in lines:
-        p = parse_line(line)
+        p = parse_line(line, type)
         if p is not None:
             stats.append(p)
 
@@ -70,58 +102,100 @@ def get_df_from_file(lines):
 def get_idx_val(row):
     return row.index.values[0]
 
-# TODO: Should create lots of different versions of this to test accuracy...
-def get_chunks(df, chunk_size_bytes=10000):
+
+class ChunkMode(Enum):
+    DEFAULT=1
+    SEQUENTIAL_BY_OCCURRENCE = 1
+    BY_SOURCE_ADDR = 2 # TODO
+
+
+# TODO: Should create lots of different versions of this to compare accuracy...
+def get_chunks(df, chunk_sz_instr, chunk_mode=ChunkMode.DEFAULT):
+    if chunk_mode == ChunkMode.SEQUENTIAL_BY_OCCURRENCE:
+        return get_chunks_seq_by_occurrence(df, chunk_sz_instr)
+
+
+def get_chunks_seq_by_occurrence(df, chunk_sz_instr):
    
-    if len(df) < chunk_size_bytes:
+    if len(df) < chunk_sz_instr:
         return [df]
     
-    n_chunks = len(df) / chunk_size_bytes
-    print 'n_chunks: ' + str(n_chunks)
+    n_chunks = len(df) / chunk_sz_instr
 
     ret = []
     for i in range(0, n_chunks+1):
-        start_idx = (i*chunk_size_bytes)
-        chunk_df = df.iloc[start_idx:start_idx+chunk_size_bytes]
+        start_idx = (i*chunk_sz_instr)
+        chunk_df = df.iloc[start_idx:start_idx+chunk_sz_instr]
         if not chunk_df.empty:
-            #print 'Chunk %d:%d len = %d' % (start_idx, start_idx + chunk_size_bytes, len(chunk_df))
             ret.append(chunk_df)
+
+    print 'got %d chunks!' % (len(ret))
 
     return ret
 
 
-def get_chunk_mem_deltas(df, mode='default'):
+class MemOffsetMode(Enum):
+    DEFAULT = 1
+    SUM_ABS_REF = 1
+    SUM_REF_ASC = 2
+    MAX_REF = 3
+    MIN_REF = 4
+    MEAN = 5
+
+
+def get_chunk_mem_deltas(df, chunk_sz_instr=10000, mode=MemOffsetMode.DEFAULT):
     ret = []
-    for c in get_chunks(df):
+    for c in get_chunks(df, chunk_sz_instr):
         ret.append(calc_mem_access_delta(c, mode))
 
     return ret
 
 
-# TODO: Add support for: sum, max, min, abs... of references from base reference
-def calc_mem_access_delta(df, mode='default'):
+def calc_mem_access_delta(df, mode=MemOffsetMode.DEFAULT):
+    ret = 0
 
     if len(df) == 1:
         return 0
 
     base_reference = df.head(1)['TGT'].values[0]
+    tgt_deltas = df['TGT'].apply(lambda mem_access: mem_access - base_reference)
 
-    tgt_deltas = df['TGT'].apply(lambda x: base_reference - x)
-    return abs(tgt_deltas.sum())
+    if mode == MemOffsetMode.SUM_ABS_REF:
+        ret = abs(tgt_deltas.sum())
+    elif mode == MemOffsetMode.SUM_REF_ASC:
+        ret = tgt_deltas.sum()
+    elif mode == MemOffsetMode.MAX_REF:
+        ret = tgt_deltas.max()
+    elif mode == MemOffsetMode.MIN_REF:
+        ret = tgt_deltas.min()
+    elif mode == MemOffsetMode.MEAN:
+        ret = tgt_deltas.mean()
 
+    return ret
+
+
+def get_histogram(chunk_deltas):
+    # TODO: We will need to set static 'range' here so results are comparable accross all .exe's
+    # TODO: Can we emit metadata (min,max), so we can see if range should expand as we process BAU?
+    tdeltas = pd.DataFrame(chunk_tgt_deltas)
+    return np.histogram(tdeltas)
 
 if __name__ == '__main__':
     np.set_printoptions(suppress=True)
 
-    df = get_df_from_file(get_pintool_output(EXTRACTOR_NAME))
-    # Split mem access into chunks, and calculate the mem access delta (from first in chunk)
-    chunk_tgt_deltas = get_chunk_mem_deltas(df)
+    for access_type in [ 'R', 'W', 'RW']:
+        df = get_df_from_file(get_pintool_output(EXTRACTOR_NAME), access_type)
 
-    # Produce histogram
-    # TODO: We will need to set static 'range' here so results are comparable accross all .exe's
-    # TODO: Can we emit metadata (min,max), so we can see if range should expand as we process BAU?
-    tdeltas = pd.DataFrame(chunk_tgt_deltas)
-    count, division = np.histogram(tdeltas)
+        for instr_chunk_sz in [1000, 5000, 10000, 25000]:
+            for mode in MemOffsetMode:
 
-    print 'histogram buckets: %s' %(division)
-    print 'histogram counts: %s' %(count)
+                print "%s-%s-%s" % (access_type, mode, instr_chunk_sz)
+
+                # Split mem access into chunks, and calculate the mem access delta (from first in chunk)
+                chunk_tgt_deltas = get_chunk_mem_deltas(df, instr_chunk_sz, mode)
+
+                # Produce histogram
+                division, count = get_histogram(chunk_tgt_deltas)
+                print 'histogram buckets: %s' %(division)
+                print 'histogram counts: %s' %(count)
+                print '--'
