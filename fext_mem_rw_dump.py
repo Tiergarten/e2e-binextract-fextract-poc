@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 from fext_common import *
 from enum import Enum
+import pdb
 
 __version__ = "0.0.1"
 
@@ -104,6 +105,10 @@ def get_df_from_file(lines, type='rw'):
 def get_idx_val(row):
     return row.index.values[0]
 
+def get_val(pdtype):
+    assert len(pdtype.values) == 1
+    return int(pdtype.values[0])
+
 
 class ChunkMode(Enum):
     DEFAULT=1
@@ -181,16 +186,17 @@ def get_histogram(chunk_deltas, feature_name, feature_set_writer):
     tdeltas = pd.DataFrame(chunk_tgt_deltas)
 
     # Emit chunk metadata (min,max), so we can see if range should expand as we process BAU
-    feature_set_writer.write_metadata(feature_name,  # TODO: use of str() is broken here...
-                                      {'histogram_min': str(tdeltas.min()), 'histogram_max': str(tdeltas.max())})
+    minmax_metadata =  {'histogram_min': get_val(tdeltas.min()), 'histogram_max': get_val(tdeltas.max())}
+    feature_set_writer.write_metadata(feature_name, minmax_metadata) # TODO: use of str() is broken here...
 
     # TODO: We will need to set static 'range' here so results are comparable across all binaries
     return np.histogram(tdeltas)
 
 if __name__ == '__main__':
+    pd.set_option('display.float_format', lambda x: '%.2f' % x)
     np.set_printoptions(suppress=True)
 
-    feature_set_writer = FeatureSetsWriter("traceme.exe", EXTRACTOR_NAME, __version__)
+    feature_set_writer = FeatureSetsWriter("traceme.exe", 0, EXTRACTOR_NAME, __version__)
 
     for access_type in ['R', 'W', 'RW']:
         df = get_df_from_file(get_pintool_output(EXTRACTOR_NAME), access_type)
@@ -212,11 +218,13 @@ if __name__ == '__main__':
                 print 'chunk deltas: %s' % chunk_tgt_deltas
 
                 # Produce histogram
-                division, count = get_histogram(chunk_tgt_deltas, feature_name, feature_set_writer)
-                # TODO: use of str() is broken here...
-                feature_set_writer.write_feature_set(feature_name, str(count))
-                print 'histogram buckets: %s' % division
-                print 'histogram counts: %s' % count
+                divisions, counts = get_histogram(chunk_tgt_deltas, feature_name, feature_set_writer)
+                # TODO: We don't want to write scientific notation
+                feature_set_writer.write_feature_set(feature_name, counts.tolist())
+
+                print "a: %s" % (type(counts.tolist()[0]))
+                print 'histogram buckets: %s' % divisions
+                print 'histogram counts: %s' % counts
                 print '--'
 
     feature_set_writer.write_feature_sets()
