@@ -92,18 +92,30 @@ function build_extractor_pack() {
 
 	rm -rf ${packName} || true
 	mkdir -p ${packName}/deps
-	cp -r -v ${PINTOOL_INSTALL_PATH} ${packName}/deps
+	cp -r ${PINTOOL_INSTALL_PATH} ${packName}/deps
 
 	mkdir ${packName}/64
-	cp -v ${PINTOOLS_PATH}/*.dll ${packName}/64
-	cp -v p1-manifest ${packName}/manifest
+	cp ${PINTOOLS_PATH}/*.dll ${packName}/64
+	
+	#TODO: 32bit deps...
+
+	mkdir ${packName}/pack-1
+	cp p1-manifest ${packName}/pack-1/manifest
+
+	#TODO: Pin.exe is being a pest and not linking a pintool thats not in cwd?!
+	cp ${PINTOOLS_PATH}/*.dll ${packName}/pack-1
+
+	cd ${packName}
+	zip -r ${packName}.zip *
+	cd ..
 }
 
 function main() {
-	build_extractor_pack "sample_pack"
 	clean all 2>/dev/null | true
 	dotest
 	build
+	build_extractor_pack "sample_pack"
+
 
 	for extractor in "${EXTRACTORS[@]}"; do
 	

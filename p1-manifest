@@ -1,2 +1,2 @@
-run-init=..\deps\pin-3.5-97503-gac534ca30-msvc-windows\intel64\bin\pin.exe -t ..\64\aext-mem-rw-dump.dll -- <SAMPLE>
-run-seek_and_destroy=..\deps\pin-3.5-97503-gac534ca30-msvc-windows\intel64\bin\pin.exe -pid <PID> -t ..\64\aext-mem-rw-dump.dll
+run-init=..\deps\pin-3.5-97503-gac534ca30-msvc-windows\intel64\bin\pin.exe -t aext-mem-rw-dump.dll -- ..\..\<SAMPLE>
+run-seek_and_destroy=..\deps\pin-3.5-97503-gac534ca30-msvc-windows\intel64\bin\pin.exe -pid <PID> -t aext-mem-rw-dump.dll
