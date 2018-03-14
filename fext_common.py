@@ -1,5 +1,7 @@
 import json
 
+from json import encoder
+encoder.FLOAT_REPR = lambda o: format(o, '.2f') 
 
 def pp_pin_output(output):
     ret = []
@@ -20,11 +22,12 @@ def get_pintool_output(extractor_name):
 
 
 class FeatureSetsWriter:
-    def __init__(self, sample_id, feature_set_name, feature_set_ver):
+    def __init__(self, sample_id, run_id, feature_set_name, feature_set_ver):
         self.body = {}
         self.feature_sets = {}
 
         self.body['sample_id'] = sample_id
+        self.body['run_id'] = run_id
         self.body['feature_set_name'] = feature_set_name
         self.body['feature_set_ver'] = feature_set_ver
 
