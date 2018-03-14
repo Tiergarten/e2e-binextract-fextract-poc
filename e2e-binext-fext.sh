@@ -87,7 +87,20 @@ function get_feature_extractor() {
 	echo "f${extractorName}.py" | sed 's/-/_/g'
 }
 
+function build_extractor_pack() {
+	local packName=$1
+
+	rm -rf ${packName} || true
+	mkdir -p ${packName}/deps
+	cp -r -v ${PINTOOL_INSTALL_PATH} ${packName}/deps
+
+	mkdir ${packName}/64
+	cp -v ${PINTOOLS_PATH}/*.dll ${packName}/64
+	cp -v p1-manifest ${packName}/manifest
+}
+
 function main() {
+	build_extractor_pack "sample_pack"
 	clean all 2>/dev/null | true
 	dotest
 	build
