@@ -10,13 +10,23 @@ EXTRACTORS=( ext-dump-ins ext-mem-rw-dump )
 
 INSTALL_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PINTOOL_INSTALL_PATH="${INSTALL_DIR}/../../dependencies/pin-3.5-97503-gac534ca30-msvc-windows"
-# FIXME: This is hardcoded 64bit dll...
-PINTOOLS_PATH="${INSTALL_DIR}/obj-intel64"
+
+PINTOOLS_PATH32="${INSTALL_DIR}/obj-ia32"
+PINTOOLS_PATH64="${INSTALL_DIR}/obj-intel64"
+
+function get_pintool_dir() {
+	if [[ $(is64) -eq 1 ]]; then
+		echo ${PINTOOLS_PATH64}
+	else
+		echo ${PINTOOLS_PATH32}
+	fi
+}
 
 function get_pin_tool_path() {
 	local extractorName=$1
 
-	echo "${PINTOOLS_PATH}/a${extractorName}.dll"
+	path=$(get_pintool_dir)
+	echo "${path}/a${extractorName}.dll"
 }
 
 function clean() {
@@ -77,6 +87,14 @@ function is64() {
 	fi
 }
 
+function getArch() {
+	if [[ $(is64) -eq 1 ]]; then
+		echo "64"
+	else
+		echo "32"
+	fi
+}
+
 function get_feature_extractor_output_file() {
 	local extractorName=$1
 	echo "f${extractorName}.out"
@@ -94,18 +112,18 @@ function build_extractor_pack() {
 	mkdir -p ${packName}/deps
 	cp -r ${PINTOOL_INSTALL_PATH} ${packName}/deps
 
-	mkdir ${packName}/64
-	cp ${PINTOOLS_PATH}/*.dll ${packName}/64
-	
-	#TODO: 32bit deps...
-
 	mkdir ${packName}/pack-1
 	cp p1-manifest ${packName}/pack-1/manifest
 
 	#TODO: Pin.exe is being a pest and not linking a pintool thats not in cwd?!
-	cp ${PINTOOLS_PATH}/*.dll ${packName}/pack-1
+	cp $(get_pintool_dir)/*.dll ${packName}/pack-1
+	cd ${packName}/pack-1
+	for d in $(ls *.dll); do
+		RN=$(echo $d | sed "s/\.dll/$(getArch).dll/g")
+		mv $d $RN
+	done
+	cd ..
 
-	cd ${packName}
 	zip -r ${packName}.zip *
 	cd ..
 }

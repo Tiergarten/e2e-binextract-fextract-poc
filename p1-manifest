@@ -1,3 +1,6 @@
-run-init=..\deps\pin-3.5-97503-gac534ca30-msvc-windows\intel64\bin\pin.exe -t aext-mem-rw-dump.dll -- ..\..\<SAMPLE>
-run-seek_and_destroy=..\deps\pin-3.5-97503-gac534ca30-msvc-windows\intel64\bin\pin.exe -pid <PID> -t aext-mem-rw-dump.dll
+run-init64=..\deps\pin-3.5-97503-gac534ca30-msvc-windows\intel64\bin\pin.exe -t aext-mem-rw-dump64.dll -- ..\..\<SAMPLE> /silent
+run-seek_and_destroy64=..\deps\pin-3.5-97503-gac534ca30-msvc-windows\intel64\bin\pin.exe -pid <PID> -t aext-mem-rw-dump64.dll
+run-init32=..\deps\pin-3.5-97503-gac534ca30-msvc-windows\pin.exe -t aext-mem-rw-dump32.dll -- ..\..\<SAMPLE> /silent
+run-seek_and_destroy32=..\deps\pin-3.5-97503-gac534ca30-msvc-windows\pin.exe -pid <PID> -t aext-mem-rw-dump32.dll
 upload-file=aext-mem-rw-dump.out
+total-runs=3
